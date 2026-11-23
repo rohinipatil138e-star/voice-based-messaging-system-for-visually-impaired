@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+
+{% block title %}Compose Message - Voice Messaging System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="compose-form">
+        <h1>Compose Voice Message</h1>
+        <p>Record your voice message and send it via email.</p>
+
+        <form id="composeForm" class="form" role="form">
+            <div class="form-group">
+                <label for="recipient" class="form-label">Recipient Email:</label>
+                <input type="email" id="recipient" name="recipient" class="form-input" required
+                    aria-describedby="recipient-help" placeholder="Enter recipient's email address">
+                <div id="recipient-help" class="form-help">
+                    Enter the email address of the person you want to send the message to
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="subject" class="form-label">Subject:</label>
+                <input type="text" id="subject" name="subject" class="form-input" aria-describedby="subject-help"
+                    placeholder="Enter message subject">
+                <div id="subject-help" class="form-help">
+                    Optional: Enter a subject for your message
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="messageContent" class="form-label">Message Content:</label>
+                <textarea id="messageContent" name="content" class="form-input" rows="4" aria-describedby="content-help"
+                    placeholder="Type your message or use voice recording"></textarea>
+                <div id="content-help" class="form-help">
+                    You can type your message here or use voice recording below
+                </div>
+            </div>
+
+            <div class="voice-controls">
+                <h3>Voice Recording</h3>
+                <div class="recording-controls">
+                    <button type="button" id="startRecording" class="btn btn-primary">
+                        🎤 Start Recording
+                    </button>
+                    <button type="button" id="stopRecording" class="btn btn-secondary" disabled>
+                        ⏹️ Stop Recording
+                    </button>
+                    <button type="button" id="playRecording" class="btn btn-secondary" disabled>
+                        ▶️ Play Recording
+                    </button>
+                </div>
+                <div id="recordingStatus" class="recording-status" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="sendBtn">
+                    📧 Send Message
+                </button>
+                <button type="button" class="btn btn-secondary" id="saveDraftBtn">
+                    💾 Save as Draft
+                </button>
+                <a href="/dashboard" class="btn btn-secondary">
+                    ← Back to Dashboard
+                </a>
+            </div>
+        </form>
+
+        <div id="composeStatus" class="status-message" role="status" aria-live="polite"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const composeForm = document.getElementById('composeForm');
+        const composeStatus = document.getElementById('composeStatus');
+        const startRecordingBtn = document.getElementById('startRecording');
+        const stopRecordingBtn = document.getElementById('stopRecording');
+        const playRecordingBtn = document.getElementById('playRecording');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const messageContent = document.getElementById('messageContent');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let recordedBlob;
+
+        // Voice recording functionality using the new voice interface
+        startRecordingBtn.addEventListener('click', async function () {
+            if (window.voiceInterface) {
+                const success = await window.voiceInterface.startRecording();
+                if (success) {
+                    startRecordingBtn.disabled = true;
+                    stopRecordingBtn.disabled = false;
+                    recordingStatus.textContent = 'Recording... Speak your message now.';
+                    recordingStatus.className = 'recording-status recording-active';
+                } else {
+                    recordingStatus.textContent = 'Error accessing microphone. Please check permissions.';
+                    recordingStatus.className = 'recording-status status-error';
+                }
+                return;
+            }
+
+            // Fallback to original recording code
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = function (event) {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = function () {
+                    recordedBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    playRecordingBtn.disabled = false;
+
+                    // Convert to text
+                    convertSpeechToText(recordedBlob);
+                };
+
+                mediaRecorder.start();
+                startRecordingBtn.disabled = true;
+                stopRecordingBtn.disabled = false;
+                recordingStatus.textContent = 'Recording... Speak your message now.';
+                recordingStatus.className = 'recording-status recording-active';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Recording started. Speak your message now.');
+                }
+
+            } catch (error) {
+                recordingStatus.textContent = 'Error accessing microphone. Please check permissions.';
+                recordingStatus.className = 'recording-status status-error';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Error accessing microphone. Please check your microphone permissions.');
+                }
+            }
+        });
+
+        stopRecordingBtn.addEventListener('click', function () {
+            if (window.voiceInterface && window.voiceInterface.isRecording) {
+                window.voiceInterface.stopRecording();
+                startRecordingBtn.disabled = false;
+                stopRecordingBtn.disabled = true;
+                recordingStatus.textContent = 'Recording stopped. Converting to text...';
+                recordingStatus.className = 'recording-status status-info';
+                return;
+            }
+
+            // Fallback to original code
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+
+                startRecordingBtn.disabled = false;
+                stopRecordingBtn.disabled = true;
+                recordingStatus.textContent = 'Recording stopped. Converting to text...';
+                recordingStatus.className = 'recording-status status-info';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Recording stopped. Converting your speech to text.');
+                }
+            }
+        });
+
+        // Listen for speech-to-text completion from voice interface
+        document.addEventListener('speechToTextComplete', function (event) {
+            const { text, confidence } = event.detail;
+            recordingStatus.textContent = `Speech converted successfully! Confidence: ${Math.round(confidence * 100)}%`;
+            recordingStatus.className = 'recording-status status-success';
+            playRecordingBtn.disabled = false;
+        });
+
+        // Listen for voice recording completion
+        document.addEventListener('voiceRecordingComplete', function (event) {
+            recordedBlob = event.detail.audioBlob;
+            playRecordingBtn.disabled = false;
+        });
+
+        playRecordingBtn.addEventListener('click', function () {
+            if (recordedBlob) {
+                const audio = new Audio(URL.createObjectURL(recordedBlob));
+                audio.play();
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Playing your recorded message.');
+                }
+            }
+        });
+
+        // Convert speech to text
+        async function convertSpeechToText(audioBlob) {
+            try {
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.wav');
+
+                const sessionToken = localStorage.getItem('session_token');
+                const response = await fetch('/api/speech/recognize', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    messageContent.value = result.text;
+                    recordingStatus.textContent = 'Speech converted to text successfully!';
+                    recordingStatus.className = 'recording-status status-success';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Speech converted to text. You can now review and edit your message.');
+                    }
+                } else {
+                    recordingStatus.textContent = 'Failed to convert speech to text: ' + result.error.message;
+                    recordingStatus.className = 'recording-status status-error';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Failed to convert speech to text. You can type your message manually.');
+                    }
+                }
+            } catch (error) {
+                recordingStatus.textContent = 'Error converting speech to text.';
+                recordingStatus.className = 'recording-status status-error';
+            }
+        }
+
+        // Handle form submission
+        composeForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(composeForm);
+            const messageData = {
+                recipient_email: formData.get('recipient'),
+                subject: formData.get('subject'),
+                content: formData.get('content')
+            };
+
+            if (!messageData.recipient_email || !messageData.content) {
+                composeStatus.textContent = 'Please provide recipient email and message content.';
+                composeStatus.className = 'status-message status-error';
+                return;
+            }
+
+            try {
+                composeStatus.textContent = 'Sending message...';
+                composeStatus.className = 'status-message status-info';
+
+                const sessionToken = localStorage.getItem('session_token');
+                const response = await fetch('/api/messages/send-email', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify(messageData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    composeStatus.textContent = 'Message sent successfully!';
+                    composeStatus.className = 'status-message status-success';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Message sent successfully to ' + messageData.recipient_email);
+                    }
+
+                    // Clear form
+                    composeForm.reset();
+                    playRecordingBtn.disabled = true;
+                    recordingStatus.textContent = '';
+
+                    // Redirect after delay
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 3000);
+                } else {
+                    composeStatus.textContent = 'Failed to send message: ' + result.error.message;
+                    composeStatus.className = 'status-message status-error';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Failed to send message. ' + result.error.message);
+                    }
+                }
+            } catch (error) {
+                composeStatus.textContent = 'Error sending message. Please try again.';
+                composeStatus.className = 'status-message status-error';
+            }
+        });
+
+        // Handle Save as Draft functionality
+        const saveDraftBtn = document.getElementById('saveDraftBtn');
+        saveDraftBtn.addEventListener('click', async function () {
+            const formData = new FormData(composeForm);
+            const messageData = {
+                recipient_email: formData.get('recipient'),
+                subject: formData.get('subject'),
+                content: formData.get('content')
+            };
+
+            if (!messageData.content) {
+                composeStatus.textContent = 'Please provide message content to save as draft.';
+                composeStatus.className = 'status-message status-error';
+                return;
+            }
+
+            try {
+                composeStatus.textContent = 'Saving draft...';
+                composeStatus.className = 'status-message status-info';
+
+                const sessionToken = localStorage.getItem('session_token');
+                const response = await fetch('/api/messages/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${sessionToken}`
+                    },
+                    body: JSON.stringify(messageData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    composeStatus.textContent = 'Draft saved successfully!';
+                    composeStatus.className = 'status-message status-success';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Draft saved successfully. You can continue editing or send it later.');
+                    }
+                } else {
+                    composeStatus.textContent = 'Failed to save draft: ' + result.error.message;
+                    composeStatus.className = 'status-message status-error';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Failed to save draft. ' + result.error.message);
+                    }
+                }
+            } catch (error) {
+                composeStatus.textContent = 'Error saving draft. Please try again.';
+                composeStatus.className = 'status-message status-error';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Error saving draft. Please try again.');
+                }
+            }
+        });
+
+        // Announce page load
+        if (window.voiceInterface) {
+            setTimeout(() => {
+                window.voiceInterface.speakText('Compose message page loaded. Enter recipient email, then record your voice message or type your message.');
+            }, 1000);
+        }
+    });
+</script>
+{% endblock %}

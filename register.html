@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block title %}Register - Voice Messaging System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="auth-form">
+        <h1>Register for Voice Messaging System</h1>
+        <p>Create your account to start using the accessible voice messaging platform.</p>
+
+        <form id="registerForm" class="form" role="form" aria-labelledby="register-heading">
+            <div class="form-group">
+                <label for="username" class="form-label">Username:</label>
+                <input type="text" id="username" name="username" class="form-input" required minlength="3"
+                    maxlength="80" aria-describedby="username-help" autocomplete="username">
+                <div id="username-help" class="form-help">
+                    Choose a unique username (3-80 characters)
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="email" class="form-label">Email Address:</label>
+                <input type="email" id="email" name="email" class="form-input" required aria-describedby="email-help"
+                    autocomplete="email">
+                <div id="email-help" class="form-help">
+                    Enter a valid email address
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password:</label>
+                <input type="password" id="password" name="password" class="form-input" required minlength="8"
+                    aria-describedby="password-help" autocomplete="new-password">
+                <div id="password-help" class="form-help">
+                    At least 8 characters with letters and numbers
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="confirmPassword" class="form-label">Confirm Password:</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" class="form-input" required
+                    aria-describedby="confirm-password-help" autocomplete="new-password">
+                <div id="confirm-password-help" class="form-help">
+                    Re-enter your password to confirm
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="registerBtn">
+                    Register
+                </button>
+                <button type="button" class="btn btn-secondary" id="voiceRegisterBtn">
+                    Register with Voice
+                </button>
+            </div>
+        </form>
+
+        <div class="auth-links">
+            <p>Already have an account? <a href="/login">Login here</a></p>
+        </div>
+
+        <div id="registerStatus" class="status-message" role="status" aria-live="polite"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const registerForm = document.getElementById('registerForm');
+        const registerStatus = document.getElementById('registerStatus');
+        const voiceRegisterBtn = document.getElementById('voiceRegisterBtn');
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirmPassword');
+
+        // Password confirmation validation
+        function validatePasswordMatch() {
+            if (passwordInput.value !== confirmPasswordInput.value) {
+                confirmPasswordInput.setCustomValidity('Passwords do not match');
+            } else {
+                confirmPasswordInput.setCustomValidity('');
+            }
+        }
+
+        passwordInput.addEventListener('input', validatePasswordMatch);
+        confirmPasswordInput.addEventListener('input', validatePasswordMatch);
+
+        // Clean input function - removes trailing dots only and converts email to lowercase
+        function cleanInput(value, type) {
+            if (!value) return value;
+            
+            // Remove trailing dots from the END only (not from middle)
+            value = value.replace(/\.+$/, '');
+            
+            // Type-specific cleaning
+            if (type === 'email') {
+                // Convert to lowercase
+                value = value.toLowerCase();
+            } else if (type === 'username') {
+                // Clean extra spaces
+                value = value.replace(/\s+/g, ' ').trim();
+            }
+            
+            return value;
+        }
+
+        // REAL-TIME cleaning - removes dots as you type
+        function setupRealtimeCleaning(inputId, type) {
+            const input = document.getElementById(inputId);
+            
+            // Clean on every keystroke
+            input.addEventListener('input', function() {
+                const cursorPos = this.selectionStart;
+                const oldValue = this.value;
+                const newValue = cleanInput(oldValue, type);
+                
+                if (oldValue !== newValue) {
+                    this.value = newValue;
+                    // Adjust cursor position
+                    const diff = oldValue.length - newValue.length;
+                    this.setSelectionRange(cursorPos - diff, cursorPos - diff);
+                }
+            });
+            
+            // Also clean when leaving field
+            input.addEventListener('blur', function() {
+                this.value = cleanInput(this.value, type);
+            });
+        }
+
+        // Setup real-time cleaning for all fields
+        setupRealtimeCleaning('username', 'username');
+        setupRealtimeCleaning('email', 'email');
+        setupRealtimeCleaning('password', 'password');
+        setupRealtimeCleaning('confirmPassword', 'password');
+
+        // Also clean on form submission
+        registerForm.addEventListener('submit', function(e) {
+            // Clean all inputs before submission
+            document.getElementById('username').value = cleanInput(document.getElementById('username').value, 'username');
+            document.getElementById('email').value = cleanInput(document.getElementById('email').value, 'email');
+            document.getElementById('password').value = cleanInput(document.getElementById('password').value, 'password');
+            document.getElementById('confirmPassword').value = cleanInput(document.getElementById('confirmPassword').value, 'password');
+        });
+
+        // Handle form submission
+        registerForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            // Validate password match
+            if (passwordInput.value !== confirmPasswordInput.value) {
+                registerStatus.textContent = 'Passwords do not match';
+                registerStatus.className = 'status-message status-error';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Passwords do not match. Please check your password entries.');
+                }
+                return;
+            }
+
+            const formData = new FormData(registerForm);
+            const registerData = {
+                username: formData.get('username'),
+                email: formData.get('email'),
+                password: formData.get('password')
+            };
+
+            try {
+                registerStatus.textContent = 'Creating account...';
+                registerStatus.className = 'status-message status-info';
+
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(registerData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    registerStatus.textContent = 'Registration successful! You can now log in.';
+                    registerStatus.className = 'status-message status-success';
+
+                    // Announce success
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Registration successful! You can now log in to your account.');
+                    }
+
+                    // Clear form
+                    registerForm.reset();
+
+                    // Redirect to login after delay
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 3000);
+                } else {
+                    registerStatus.textContent = result.error.message;
+                    registerStatus.className = 'status-message status-error';
+
+                    // Announce error
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Registration failed. ' + result.error.message);
+                    }
+                }
+            } catch (error) {
+                registerStatus.textContent = 'Registration failed. Please try again.';
+                registerStatus.className = 'status-message status-error';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Registration failed due to connection error. Please try again.');
+                }
+            }
+        });
+
+        // Voice registration functionality
+        voiceRegisterBtn.addEventListener('click', async function () {
+            if (!window.voiceInterface || !window.voiceInterface.recognition) {
+                alert('Voice interface not available. Please use the form.');
+                return;
+            }
+
+            try {
+                // Get username via voice
+                const username = await window.voiceInterface.fillFormWithVoice(
+                    'username',
+                    'Please say your desired username'
+                );
+
+                if (username) {
+                    document.getElementById('username').value = username;
+                    window.voiceInterface.speakText(`Username entered: ${username}`);
+
+                    // Get email via voice
+                    const email = await window.voiceInterface.fillFormWithVoice(
+                        'email',
+                        'Please say your email address'
+                    );
+
+                    if (email) {
+                        document.getElementById('email').value = email;
+                        window.voiceInterface.speakText(`Email entered: ${email}`);
+
+                        // Get password via voice
+                        const password = await window.voiceInterface.fillFormWithVoice(
+                            'password',
+                            'Please say your desired password'
+                        );
+
+                        if (password) {
+                            document.getElementById('password').value = password;
+                            document.getElementById('confirmPassword').value = password;
+                            window.voiceInterface.speakText('Password entered. Creating your account.');
+
+                            // Submit the form
+                            registerForm.dispatchEvent(new Event('submit'));
+                        } else {
+                            window.voiceInterface.speakText('Password not provided. Please try again.');
+                        }
+                    } else {
+                        window.voiceInterface.speakText('Email not provided. Please try again.');
+                    }
+                } else {
+                    window.voiceInterface.speakText('Username not provided. Please try again.');
+                }
+            } catch (error) {
+                console.error('Voice registration error:', error);
+                window.voiceInterface.speakText('Voice registration failed. Please use the form.');
+            }
+        });
+
+        // Announce page load
+        if (window.voiceInterface) {
+            setTimeout(() => {
+                window.voiceInterface.speakText('Registration page loaded. Fill in your username, email, and password to create your account.');
+            }, 1000);
+        }
+    });
+</script>
+{% endblock %}

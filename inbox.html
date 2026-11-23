@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+
+{% block title %}Inbox - Voice Messaging System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="inbox">
+        <h1>Your Messages</h1>
+        <p>Listen to your received messages and manage your sent messages.</p>
+
+        <div class="inbox-controls">
+            <div class="filter-controls">
+                <label for="messageFilter">Filter Messages:</label>
+                <select id="messageFilter" class="form-input">
+                    <option value="all">All Messages</option>
+                    <option value="received">Received</option>
+                    <option value="sent">Sent</option>
+                    <option value="draft">Drafts</option>
+                </select>
+            </div>
+
+            <div class="action-controls">
+                <button id="refreshMessages" class="btn btn-secondary">🔄 Refresh</button>
+                <button id="playAllBtn" class="btn btn-secondary">▶️ Play All</button>
+                <a href="/compose" class="btn btn-primary">✉️ Compose New</a>
+            </div>
+        </div>
+
+        <div id="messagesList" class="messages-list" role="region" aria-label="Messages list">
+            <div class="loading">Loading messages...</div>
+        </div>
+
+        <div class="pagination-controls" id="paginationControls" style="display: none;">
+            <button id="prevPage" class="btn btn-secondary">← Previous</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button id="nextPage" class="btn btn-secondary">Next →</button>
+        </div>
+
+        <div id="inboxStatus" class="status-message" role="status" aria-live="polite"></div>
+    </div>
+</div>
+
+<!-- Message Detail Modal -->
+<div id="messageModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTitle">Message Details</h2>
+            <button id="closeModal" class="btn btn-secondary">✕ Close</button>
+        </div>
+        <div class="modal-body">
+            <div id="messageDetails"></div>
+            <div class="message-actions">
+                <button id="playMessageBtn" class="btn btn-primary">▶️ Play Message</button>
+                <button id="replyBtn" class="btn btn-secondary">↩️ Reply</button>
+                <button id="deleteBtn" class="btn btn-danger">🗑️ Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const messagesList = document.getElementById('messagesList');
+        const inboxStatus = document.getElementById('inboxStatus');
+        const messageFilter = document.getElementById('messageFilter');
+        const refreshBtn = document.getElementById('refreshMessages');
+        const playAllBtn = document.getElementById('playAllBtn');
+        const paginationControls = document.getElementById('paginationControls');
+        const prevPageBtn = document.getElementById('prevPage');
+        const nextPageBtn = document.getElementById('nextPage');
+        const pageInfo = document.getElementById('pageInfo');
+
+        // Modal elements
+        const messageModal = document.getElementById('messageModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const messageDetails = document.getElementById('messageDetails');
+        const closeModal = document.getElementById('closeModal');
+        const playMessageBtn = document.getElementById('playMessageBtn');
+        const replyBtn = document.getElementById('replyBtn');
+        const deleteBtn = document.getElementById('deleteBtn');
+
+        let currentPage = 1;
+        let totalPages = 1;
+        let currentFilter = 'all';
+        let messages = [];
+        let currentMessage = null;
+
+        // Load messages
+        async function loadMessages(page = 1, filter = 'all') {
+            try {
+                inboxStatus.textContent = 'Loading messages...';
+                inboxStatus.className = 'status-message status-info';
+
+                const sessionToken = localStorage.getItem('session_token');
+                const url = `/api/messages/?page=${page}&per_page=10&type=${filter}`;
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`
+                    }
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    messages = result.messages;
+                    currentPage = result.pagination.page;
+                    totalPages = result.pagination.pages;
+
+                    displayMessages(messages);
+                    updatePagination();
+
+                    inboxStatus.textContent = `Loaded ${messages.length} messages`;
+                    inboxStatus.className = 'status-message status-success';
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText(`Loaded ${messages.length} messages. Use arrow keys to navigate or click on messages to read them.`);
+                    }
+                } else {
+                    inboxStatus.textContent = 'Failed to load messages: ' + result.error.message;
+                    inboxStatus.className = 'status-message status-error';
+                }
+            } catch (error) {
+                inboxStatus.textContent = 'Error loading messages. Please try again.';
+                inboxStatus.className = 'status-message status-error';
+            }
+        }
+
+        // Display messages
+        function displayMessages(messages) {
+            if (messages.length === 0) {
+                messagesList.innerHTML = '<div class="no-messages">No messages found.</div>';
+                return;
+            }
+
+            const messagesHtml = messages.map(message => `
+            <div class="message-item" data-message-id="${message.id}" tabindex="0" role="button">
+                <div class="message-header">
+                    <span class="message-type ${message.message_type}">${message.message_type.toUpperCase()}</span>
+                    <span class="message-date">${new Date(message.created_at).toLocaleDateString()}</span>
+                </div>
+                <div class="message-info">
+                    <div class="message-subject">${message.subject || 'No Subject'}</div>
+                    <div class="message-recipient">${message.message_type === 'sent' ? 'To: ' + message.recipient_email : 'Voice Message'}</div>
+                </div>
+                <div class="message-preview">
+                    ${message.content ? message.content.substring(0, 100) + (message.content.length > 100 ? '...' : '') : 'Audio message'}
+                </div>
+                <div class="message-actions-inline">
+                    ${message.has_audio ? '<span class="audio-indicator">🎵 Audio</span>' : ''}
+                    ${!message.is_read && message.message_type === 'received' ? '<span class="unread-indicator">● New</span>' : ''}
+                </div>
+            </div>
+        `).join('');
+
+            messagesList.innerHTML = messagesHtml;
+
+            // Add click handlers
+            document.querySelectorAll('.message-item').forEach(item => {
+                item.addEventListener('click', function () {
+                    const messageId = this.dataset.messageId;
+                    const message = messages.find(m => m.id == messageId);
+                    showMessageDetails(message);
+                });
+
+                item.addEventListener('keypress', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        this.click();
+                    }
+                });
+            });
+        }
+
+        // Show message details
+        function showMessageDetails(message) {
+            currentMessage = message;
+            modalTitle.textContent = message.subject || 'Voice Message';
+
+            const detailsHtml = `
+            <div class="message-detail">
+                <p><strong>Type:</strong> ${message.message_type.toUpperCase()}</p>
+                <p><strong>Date:</strong> ${new Date(message.created_at).toLocaleString()}</p>
+                ${message.recipient_email ? `<p><strong>Recipient:</strong> ${message.recipient_email}</p>` : ''}
+                ${message.sent_at ? `<p><strong>Sent:</strong> ${new Date(message.sent_at).toLocaleString()}</p>` : ''}
+                <div class="message-content">
+                    <strong>Content:</strong>
+                    <div class="content-text">${message.content || 'Audio message - click Play to listen'}</div>
+                </div>
+            </div>
+        `;
+
+            messageDetails.innerHTML = detailsHtml;
+            messageModal.style.display = 'block';
+
+            // Update button states
+            playMessageBtn.disabled = !message.has_audio;
+            replyBtn.style.display = message.message_type === 'received' ? 'inline-block' : 'none';
+
+            if (window.voiceInterface) {
+                window.voiceInterface.speakText(`Message details opened. ${message.subject || 'Voice message'}. ${message.content || 'Audio message available for playback.'}`);
+            }
+        }
+
+        // Update pagination
+        function updatePagination() {
+            if (totalPages <= 1) {
+                paginationControls.style.display = 'none';
+            } else {
+                paginationControls.style.display = 'block';
+                pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+                prevPageBtn.disabled = currentPage <= 1;
+                nextPageBtn.disabled = currentPage >= totalPages;
+            }
+        }
+
+        // Play message content
+        async function playMessageContent(message) {
+            try {
+                if (message.content) {
+                    // Use text-to-speech for text content
+                    const sessionToken = localStorage.getItem('session_token');
+                    const response = await fetch('/api/speech/synthesize', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${sessionToken}`
+                        },
+                        body: JSON.stringify({ text: message.content })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (window.voiceInterface) {
+                            window.voiceInterface.speakText(message.content);
+                        }
+                    } else {
+                        if (window.voiceInterface) {
+                            window.voiceInterface.speakText('Failed to play message content.');
+                        }
+                    }
+                } else if (message.has_audio) {
+                    // TODO: Implement audio file playback
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Audio playback will be implemented soon.');
+                    }
+                }
+            } catch (error) {
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Error playing message.');
+                }
+            }
+        }
+
+        // Event listeners
+        messageFilter.addEventListener('change', function () {
+            currentFilter = this.value;
+            currentPage = 1;
+            loadMessages(currentPage, currentFilter);
+        });
+
+        refreshBtn.addEventListener('click', function () {
+            loadMessages(currentPage, currentFilter);
+        });
+
+        playAllBtn.addEventListener('click', function () {
+            if (window.voiceInterface) {
+                const messageTexts = messages.map(m => m.content || 'Audio message').join('. Next message: ');
+                window.voiceInterface.speakText('Playing all messages: ' + messageTexts);
+            }
+        });
+
+        prevPageBtn.addEventListener('click', function () {
+            if (currentPage > 1) {
+                loadMessages(currentPage - 1, currentFilter);
+            }
+        });
+
+        nextPageBtn.addEventListener('click', function () {
+            if (currentPage < totalPages) {
+                loadMessages(currentPage + 1, currentFilter);
+            }
+        });
+
+        closeModal.addEventListener('click', function () {
+            messageModal.style.display = 'none';
+        });
+
+        playMessageBtn.addEventListener('click', function () {
+            if (currentMessage) {
+                playMessageContent(currentMessage);
+            }
+        });
+
+        replyBtn.addEventListener('click', function () {
+            if (currentMessage && currentMessage.message_type === 'received') {
+                // TODO: Implement reply functionality
+                window.location.href = '/compose';
+            }
+        });
+
+        deleteBtn.addEventListener('click', async function () {
+            if (currentMessage && confirm('Are you sure you want to delete this message?')) {
+                try {
+                    const sessionToken = localStorage.getItem('session_token');
+                    const response = await fetch(`/api/messages/${currentMessage.id}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Authorization': `Bearer ${sessionToken}`
+                        }
+                    });
+
+                    if (response.ok) {
+                        messageModal.style.display = 'none';
+                        loadMessages(currentPage, currentFilter);
+
+                        if (window.voiceInterface) {
+                            window.voiceInterface.speakText('Message deleted successfully.');
+                        }
+                    } else {
+                        alert('Failed to delete message.');
+                    }
+                } catch (error) {
+                    alert('Error deleting message.');
+                }
+            }
+        });
+
+        // Close modal on escape key
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && messageModal.style.display === 'block') {
+                messageModal.style.display = 'none';
+            }
+        });
+
+        // Initial load
+        loadMessages();
+
+        // Announce page load
+        if (window.voiceInterface) {
+            setTimeout(() => {
+                window.voiceInterface.speakText('Inbox page loaded. Your messages are being loaded. Use the filter dropdown to filter messages or click on any message to read it.');
+            }, 1000);
+        }
+    });
+</script>
+{% endblock %}

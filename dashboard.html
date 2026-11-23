@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Voice Messaging System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="dashboard">
+        <header class="dashboard-header">
+            <h1>Welcome, {{ user.username }}!</h1>
+            <p>Your Voice Messaging Dashboard</p>
+        </header>
+
+        <nav class="dashboard-nav" role="navigation" aria-label="Dashboard navigation">
+            <div class="nav-actions">
+                <a href="/compose" class="btn btn-primary" role="button">
+                    <span class="btn-icon">🎤</span>
+                    Compose Message
+                </a>
+                <a href="/inbox" class="btn btn-secondary" role="button">
+                    <span class="btn-icon">📥</span>
+                    View Messages
+                </a>
+                <button id="checkEmailsBtn" class="btn btn-secondary" type="button">
+                    <span class="btn-icon">📧</span>
+                    Check New Emails
+                </button>
+                <button id="voiceCommandBtn" class="btn btn-secondary" type="button">
+                    <span class="btn-icon">🗣️</span>
+                    Voice Commands
+                </button>
+            </div>
+        </nav>
+
+        <main class="dashboard-content">
+            <section class="quick-stats" aria-labelledby="stats-heading">
+                <h2 id="stats-heading">Quick Stats</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Draft Messages</h3>
+                        <p class="stat-number" id="draftCount">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Sent Messages</h3>
+                        <p class="stat-number" id="sentCount">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Received Messages</h3>
+                        <p class="stat-number" id="receivedCount">0</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="recent-activity" aria-labelledby="activity-heading">
+                <h2 id="activity-heading">Recent Activity</h2>
+                <div id="recentMessages" class="message-list">
+                    <p>Loading recent messages...</p>
+                </div>
+            </section>
+        </main>
+
+        <aside class="dashboard-sidebar">
+            <div class="user-info">
+                <h3>Account Information</h3>
+                <p><strong>Username:</strong> {{ user.username }}</p>
+                <p><strong>Email:</strong> {{ user.email }}</p>
+                <p><strong>Member since:</strong> {{ user.created_at.strftime('%B %Y') if user.created_at else 'Unknown'
+                    }}</p>
+            </div>
+
+            <div class="quick-actions">
+                <h3>Quick Actions</h3>
+                <button id="createDemoBtn" class="btn btn-primary" type="button">📨 Create Demo Received Message</button>
+                <button id="logoutBtn" class="btn btn-secondary" type="button">Logout</button>
+            </div>
+        </aside>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const voiceCommandBtn = document.getElementById('voiceCommandBtn');
+        const checkEmailsBtn = document.getElementById('checkEmailsBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
+
+        // Create demo received message functionality
+        const createDemoBtn = document.getElementById('createDemoBtn');
+        createDemoBtn.addEventListener('click', async function () {
+            try {
+                createDemoBtn.disabled = true;
+                createDemoBtn.innerHTML = '<span class="btn-icon">⏳</span> Creating...';
+
+                const sessionToken = localStorage.getItem('session_token');
+                const response = await fetch('/api/email/demo-received', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert('✅ Demo received message created!');
+                    
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Demo received message created successfully. Refreshing dashboard.');
+                    }
+                    
+                    // Reload dashboard data
+                    loadDashboardData();
+                } else {
+                    alert('❌ Failed to create demo message: ' + result.error.message);
+                }
+            } catch (error) {
+                alert('❌ Error creating demo message. Please try again.');
+            } finally {
+                createDemoBtn.disabled = false;
+                createDemoBtn.innerHTML = '<span class="btn-icon">📨</span> Create Demo Received Message';
+            }
+        });
+
+        // Check new emails functionality
+        checkEmailsBtn.addEventListener('click', async function () {
+            try {
+                checkEmailsBtn.disabled = true;
+                checkEmailsBtn.innerHTML = '<span class="btn-icon">⏳</span> Checking...';
+
+                const sessionToken = localStorage.getItem('session_token');
+                const response = await fetch('/api/email/fetch-emails', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    const count = result.data.count;
+                    alert(`✅ Found ${count} new email${count !== 1 ? 's' : ''}!`);
+                    
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText(`Found ${count} new email${count !== 1 ? 's' : ''}. Refreshing dashboard.`);
+                    }
+                    
+                    // Reload dashboard data
+                    loadDashboardData();
+                } else {
+                    alert('❌ Failed to check emails: ' + result.error.message);
+                }
+            } catch (error) {
+                alert('❌ Error checking emails. Please try again.');
+            } finally {
+                checkEmailsBtn.disabled = false;
+                checkEmailsBtn.innerHTML = '<span class="btn-icon">📧</span> Check New Emails';
+            }
+        });
+
+        // Voice commands functionality
+        voiceCommandBtn.addEventListener('click', function () {
+            if (window.voiceInterface) {
+                window.voiceInterface.speakText('Voice commands: Say "compose message" to create a new message, "view messages" to see your inbox, or "logout" to sign out.');
+            } else {
+                alert('Voice interface not available.');
+            }
+        });
+
+
+
+        // Logout functionality
+        logoutBtn.addEventListener('click', async function () {
+            try {
+                const sessionToken = localStorage.getItem('session_token');
+
+                const response = await fetch('/api/auth/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${sessionToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    localStorage.removeItem('session_token');
+
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Logout successful. Goodbye!');
+                    }
+
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    alert('Logout failed. Please try again.');
+                }
+            } catch (error) {
+                alert('Logout failed due to connection error.');
+            }
+        });
+
+        // Load dashboard data
+        loadDashboardData();
+
+        // Announce page load
+        if (window.voiceInterface) {
+            setTimeout(() => {
+                window.voiceInterface.speakText('Dashboard loaded. Welcome {{ user.username }}. You can compose a message, view your messages, or use voice commands.');
+            }, 1000);
+        }
+    });
+
+    async function loadDashboardData() {
+        try {
+            const sessionToken = localStorage.getItem('session_token');
+
+            // Load draft messages count
+            const draftResponse = await fetch('/api/messages/?type=draft&per_page=100', {
+                headers: { 'Authorization': `Bearer ${sessionToken}` }
+            });
+            if (draftResponse.ok) {
+                const draftData = await draftResponse.json();
+                const draftCount = draftData.pagination.total || 0;
+                console.log('Draft messages count:', draftCount);
+                document.getElementById('draftCount').textContent = draftCount;
+            }
+
+            // Load sent messages count
+            const sentResponse = await fetch('/api/messages/?type=sent&per_page=100', {
+                headers: { 'Authorization': `Bearer ${sessionToken}` }
+            });
+            if (sentResponse.ok) {
+                const sentData = await sentResponse.json();
+                const sentCount = sentData.pagination.total || 0;
+                console.log('Sent messages count:', sentCount);
+                document.getElementById('sentCount').textContent = sentCount;
+            }
+
+            // Load received messages count
+            const receivedResponse = await fetch('/api/messages/?type=received&per_page=100', {
+                headers: { 'Authorization': `Bearer ${sessionToken}` }
+            });
+            if (receivedResponse.ok) {
+                const receivedData = await receivedResponse.json();
+                const receivedCount = receivedData.pagination.total || 0;
+                console.log('Received messages count:', receivedCount);
+                console.log('Received data:', receivedData);
+                document.getElementById('receivedCount').textContent = receivedCount;
+            } else {
+                console.error('Failed to load received messages:', receivedResponse.status);
+            }
+
+            // Load recent messages (all types)
+            const recentResponse = await fetch('/api/messages/?type=all&per_page=5', {
+                headers: { 'Authorization': `Bearer ${sessionToken}` }
+            });
+            
+            if (recentResponse.ok) {
+                const recentData = await recentResponse.json();
+                const messages = recentData.messages;
+                
+                if (messages && messages.length > 0) {
+                    const messagesHtml = messages.map(msg => `
+                        <div class="message-item">
+                            <div class="message-header">
+                                <span class="message-type ${msg.message_type}">${msg.message_type.toUpperCase()}</span>
+                                <span class="message-date">${new Date(msg.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <div class="message-content">
+                                <strong>${msg.subject || 'No Subject'}</strong>
+                                ${msg.recipient_email ? `<br><small>To: ${msg.recipient_email}</small>` : ''}
+                                <p>${msg.content ? msg.content.substring(0, 100) + '...' : 'Audio message'}</p>
+                            </div>
+                        </div>
+                    `).join('');
+                    document.getElementById('recentMessages').innerHTML = messagesHtml;
+                } else {
+                    document.getElementById('recentMessages').innerHTML = '<p>No recent messages.</p>';
+                }
+            }
+
+        } catch (error) {
+            console.error('Failed to load dashboard data:', error);
+            document.getElementById('recentMessages').innerHTML = '<p>Error loading messages.</p>';
+        }
+    }
+</script>
+{% endblock %}

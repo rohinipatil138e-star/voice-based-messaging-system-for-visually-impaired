@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Voice Messaging System{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="auth-form">
+        <h1>Login to Voice Messaging System</h1>
+        <p>Welcome back! Please log in to access your voice messages.</p>
+
+        <form id="loginForm" class="form" role="form" aria-labelledby="login-heading">
+            <div class="form-group">
+                <label for="username" class="form-label">Username or Email:</label>
+                <input type="text" id="username" name="username" class="form-input" required
+                    aria-describedby="username-help" autocomplete="username">
+                <div id="username-help" class="form-help">
+                    Enter your username or email address
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password:</label>
+                <input type="password" id="password" name="password" class="form-input" required
+                    aria-describedby="password-help" autocomplete="current-password">
+                <div id="password-help" class="form-help">
+                    Enter your password
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="loginBtn">
+                    Login
+                </button>
+                <button type="button" class="btn btn-secondary" id="voiceLoginBtn">
+                    Login with Voice
+                </button>
+            </div>
+        </form>
+
+        <div class="auth-links">
+            <p>Don't have an account? <a href="/register">Register here</a></p>
+        </div>
+
+        <div id="loginStatus" class="status-message" role="status" aria-live="polite"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const loginForm = document.getElementById('loginForm');
+        const loginStatus = document.getElementById('loginStatus');
+        const voiceLoginBtn = document.getElementById('voiceLoginBtn');
+
+        // Clean input function - removes trailing dots only and converts email to lowercase
+        function cleanInput(value, type) {
+            if (!value) return value;
+            
+            // Remove trailing dots from the END only (not from middle)
+            value = value.replace(/\.+$/, '');
+            
+            // Type-specific cleaning
+            if (type === 'email') {
+                // Convert to lowercase
+                value = value.toLowerCase();
+            } else if (type === 'username') {
+                // If it contains @, treat as email and lowercase
+                if (value.includes('@')) {
+                    value = value.toLowerCase();
+                }
+                // Clean extra spaces
+                value = value.replace(/\s+/g, ' ').trim();
+            }
+            
+            return value;
+        }
+
+        // REAL-TIME cleaning - removes dots as you type
+        function setupRealtimeCleaning(inputId, type) {
+            const input = document.getElementById(inputId);
+            
+            // Clean on every keystroke
+            input.addEventListener('input', function() {
+                const cursorPos = this.selectionStart;
+                const oldValue = this.value;
+                const newValue = cleanInput(oldValue, type);
+                
+                if (oldValue !== newValue) {
+                    this.value = newValue;
+                    // Adjust cursor position
+                    const diff = oldValue.length - newValue.length;
+                    this.setSelectionRange(cursorPos - diff, cursorPos - diff);
+                }
+            });
+            
+            // Also clean when leaving field
+            input.addEventListener('blur', function() {
+                this.value = cleanInput(this.value, type);
+            });
+        }
+
+        // Setup real-time cleaning for all fields
+        setupRealtimeCleaning('username', 'username');
+        setupRealtimeCleaning('password', 'password');
+
+        // Also clean on form submission
+        loginForm.addEventListener('submit', function(e) {
+            // Clean all inputs before submission
+            document.getElementById('username').value = cleanInput(document.getElementById('username').value, 'username');
+            document.getElementById('password').value = cleanInput(document.getElementById('password').value, 'password');
+        });
+
+        // Handle form submission
+        loginForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(loginForm);
+            const loginData = {
+                username: formData.get('username'),
+                password: formData.get('password')
+            };
+
+            try {
+                loginStatus.textContent = 'Logging in...';
+                loginStatus.className = 'status-message status-info';
+
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(loginData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    loginStatus.textContent = 'Login successful! Redirecting...';
+                    loginStatus.className = 'status-message status-success';
+
+                    // Store session token
+                    localStorage.setItem('session_token', result.session_token);
+
+                    // Announce success and redirect
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Login successful. Welcome to your voice messaging dashboard.');
+                    }
+
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 2000);
+                } else {
+                    loginStatus.textContent = result.error.message;
+                    loginStatus.className = 'status-message status-error';
+
+                    // Announce error
+                    if (window.voiceInterface) {
+                        window.voiceInterface.speakText('Login failed. ' + result.error.message);
+                    }
+                }
+            } catch (error) {
+                loginStatus.textContent = 'Login failed. Please try again.';
+                loginStatus.className = 'status-message status-error';
+
+                if (window.voiceInterface) {
+                    window.voiceInterface.speakText('Login failed due to connection error. Please try again.');
+                }
+            }
+        });
+
+        // Voice login functionality
+        voiceLoginBtn.addEventListener('click', async function () {
+            if (!window.voiceInterface || !window.voiceInterface.recognition) {
+                alert('Voice interface not available. Please use the form.');
+                return;
+            }
+
+            try {
+                // Get username via voice
+                const username = await window.voiceInterface.fillFormWithVoice(
+                    'username',
+                    'Please say your username or email address'
+                );
+
+                if (username) {
+                    document.getElementById('username').value = username;
+                    window.voiceInterface.speakText(`Username entered: ${username}`);
+
+                    // Get password via voice
+                    const password = await window.voiceInterface.fillFormWithVoice(
+                        'password',
+                        'Please say your password'
+                    );
+
+                    if (password) {
+                        document.getElementById('password').value = password;
+                        window.voiceInterface.speakText('Password entered. Attempting to log in.');
+
+                        // Submit the form
+                        loginForm.dispatchEvent(new Event('submit'));
+                    } else {
+                        window.voiceInterface.speakText('Password not provided. Please try again.');
+                    }
+                } else {
+                    window.voiceInterface.speakText('Username not provided. Please try again.');
+                }
+            } catch (error) {
+                console.error('Voice login error:', error);
+                window.voiceInterface.speakText('Voice login failed. Please use the form.');
+            }
+        });
+
+        // Announce page load
+        if (window.voiceInterface) {
+            setTimeout(() => {
+                window.voiceInterface.speakText('Login page loaded. Enter your username or email and password, then press the login button.');
+            }, 1000);
+        }
+    });
+    
+</script>
+{% endblock %}
